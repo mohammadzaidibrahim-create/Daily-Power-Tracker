@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Daily Power Tracker V7.1</title>
+<title>Daily Power Tracker V7.2 — Hybrid Cloud</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -742,6 +742,7 @@ const DRAFT_KEY   = 'dpt_draft_v4';
 const TASKS_KEY   = 'dpt_custom_tasks_v4';
 const DAILY_TARGETS_KEY = 'dpt_daily_targets_v6';
 const API_CONFIG_KEY = 'dpt_api_config_v6';
+const CLOUD_META_KEY = 'dpt_cloud_meta_v7';
 
 // ══════════════════════════════════════════════════════
 //  V6 DAILY ACCOUNTABILITY TARGETS + API SYNC LAYER
@@ -830,6 +831,67 @@ function getApiConfig(){
 }
 function saveApiConfig(cfg){try{localStorage.setItem(API_CONFIG_KEY,JSON.stringify(cfg));}catch(e){}}
 
+// ══════════════════════════════════════════════════════
+//  V7.1 HYBRID STORAGE: local cache + Supabase cloud
+// ══════════════════════════════════════════════════════
+function getTrackerConfigPayload(){
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    tasks: TASKS.map(t=>({...t})),
+    dailyTargets: getAllDailyTargets(),
+    waste: WASTE ? {...WASTE, log:{...(WASTE.log||{})}} : null
+  };
+}
+function applyTrackerConfigPayload(cfg){
+  if(!cfg||!Array.isArray(cfg.tasks)||!cfg.tasks.length)return false;
+  TASKS=cfg.tasks.map(t=>({...t}));
+  saveTasks(TASKS);
+  state={};TASKS.forEach(t=>state[t.id]=false);
+  if(cfg.dailyTargets&&typeof cfg.dailyTargets==='object')saveDailyTargetsMap(cfg.dailyTargets);
+  if(cfg.waste&&typeof cfg.waste==='object'){WASTE={baselineYears:cfg.waste.baselineYears??10,log:cfg.waste.log||{}};saveWasteData(WASTE);}
+  localStorage.setItem(CLOUD_META_KEY,JSON.stringify({updatedAt:cfg.updatedAt||new Date().toISOString()}));
+  rebuildAfterTaskChange();
+  return true;
+}
+function findCloudTrackerConfig(){
+  const h=getStorage();
+  const entries=Object.entries(h).filter(([k,v])=>/^\d{4}-\d{2}-\d{2}$/.test(k)&&v&&v.trackerConfig&&Array.isArray(v.trackerConfig.tasks));
+  if(!entries.length)return null;
+  entries.sort((a,b)=>String(a[1].trackerConfig.updatedAt||a[0]).localeCompare(String(b[1].trackerConfig.updatedAt||b[0])));
+  return entries[entries.length-1][1].trackerConfig;
+}
+async function pushTrackerConfigToCloud(){
+  try{
+    const key=todayKey(), history=getStorage(), existing=history[key]||{};
+    const cfg=getTrackerConfigPayload();
+    const payload={...existing,trackerConfig:cfg};
+    history[key]=payload;setStorage(history);
+    return await pushHistoryDayToApi(key,payload);
+  }catch(e){console.warn('DPT config cloud sync unavailable:',e.message);return null;}
+}
+async function restoreTrackerConfigFromCloud(){
+  const cfg=findCloudTrackerConfig();
+  if(cfg){applyTrackerConfigPayload(cfg);return true;}
+  return false;
+}
+let _cloudDraftTimer=null;
+function queueCloudDraftSync(){
+  clearTimeout(_cloudDraftTimer);
+  _cloudDraftTimer=setTimeout(async()=>{
+    try{
+      const session=(await supabaseClient.auth.getSession()).data.session;
+      if(!session)return;
+      const key=todayKey(),history=getStorage(),existing=history[key]||{};
+      const draft={date:key,state:{...state},hrs:{},extras:extraTasks.map(e=>({...e})),eid:extraIdCounter,win:document.getElementById('win')?.value||'',focus:document.getElementById('focus')?.value||'',energy:document.getElementById('energy-select')?.value||'',waste:WASTE?.log?.[key]||0};
+      getActiveTasks().forEach(t=>{const el=document.getElementById('hrs-'+t.id);if(el)draft.hrs[t.id]=el.value;});
+      const payload={...existing,draftSnapshot:draft,trackerConfig:getTrackerConfigPayload()};
+      history[key]=payload;setStorage(history);
+      await pushHistoryDayToApi(key,payload);
+    }catch(e){console.warn('DPT draft cloud sync unavailable:',e.message);}
+  },3000);
+}
+
 function openAuthModal(){const m=document.getElementById('auth-modal');if(m)m.style.display='flex';document.getElementById('auth-email')?.focus();}
 function closeAuthModal(){const m=document.getElementById('auth-modal');if(m)m.style.display='none';}
 function setAuthMsg(msg,type=''){const el=document.getElementById('auth-msg');if(el){el.textContent=msg;el.className='auth-msg'+(type?' '+type:'');}}
@@ -907,6 +969,7 @@ async function syncTodayFromApi(){
   try{
     await pushAllLocalHistoryToApi();
     await syncHistoryFromApi();
+    await restoreTrackerConfigFromCloud();
     const data=await dptApi('today','GET');
     const key=todayKey();
 
@@ -967,6 +1030,7 @@ async function syncTodayFromApi(){
       }
     }
 
+    restoreCloudDraftSnapshot();
     return data;
   }catch(e){console.warn('DPT API sync unavailable:',e.message);return null;}
 }
@@ -1036,6 +1100,7 @@ function loadTasks() {
 }
 function saveTasks(arr) {
   try { localStorage.setItem(TASKS_KEY, JSON.stringify(arr)); } catch(e){}
+  if(typeof queueCloudDraftSync==='function') queueCloudDraftSync();
 }
 
 let TASKS = loadTasks();
@@ -1233,9 +1298,24 @@ function saveDraft(){
   };
   getActiveTasks().forEach(t=>{const el=document.getElementById('hrs-'+t.id);if(el)draft.hrs[t.id]=el.value;});
   try{localStorage.setItem(DRAFT_KEY,JSON.stringify(draft));}catch(e){}
+  queueCloudDraftSync();
   setTimeout(_showSaved,350);
 }
 function triggerAutosave(){clearTimeout(_asTimer);_asTimer=setTimeout(saveDraft,600);}
+
+function restoreCloudDraftSnapshot(){
+  try{
+    const snap=getStorage()[todayKey()]?.draftSnapshot;
+    if(!snap||snap.date!==todayKey())return false;
+    if(snap.state)Object.keys(snap.state).forEach(id=>{if(id in state)state[id]=!!snap.state[id];});
+    if(snap.hrs)getActiveTasks().forEach(t=>{const el=document.getElementById('hrs-'+t.id);if(el&&snap.hrs[t.id]!==undefined)el.value=snap.hrs[t.id];});
+    if(Array.isArray(snap.extras)){extraTasks=snap.extras.map(e=>({...e}));extraIdCounter=snap.eid||extraTasks.reduce((m,e)=>Math.max(m,e.id),0);renderExtraTasks();}
+    const w=document.getElementById('win'),f=document.getElementById('focus'),en=document.getElementById('energy-select');
+    if(w&&snap.win!==undefined)w.value=snap.win;if(f&&snap.focus!==undefined)f.value=snap.focus;if(en&&snap.energy!==undefined)en.value=snap.energy;
+    if(snap.waste!==undefined){WASTE.log[todayKey()]=Number(snap.waste)||0;saveWasteData(WASTE);restoreWasteToday();}
+    updateEnergyEmoji();renderTaskCards();updateUI();return true;
+  }catch(e){return false;}
+}
 
 function restoreDraft(){
   let draft=null;
@@ -1583,6 +1663,8 @@ function saveDay(){
     win:   document.getElementById('win').value,
     focus: document.getElementById('focus').value,
     energy:document.getElementById('energy-select')?.value||'',
+    trackerConfig:getTrackerConfigPayload(),
+    draftSnapshot:{date:key,state:{...state},hrs:{...taskHours},extras:extraTasks.map(e=>({...e})),eid:extraIdCounter,win:document.getElementById('win').value,focus:document.getElementById('focus').value,energy:document.getElementById('energy-select')?.value||'',waste:WASTE?.log?.[key]||0},
   };
   setStorage(history);
   pushHistoryDayToApi(key, history[key]);
