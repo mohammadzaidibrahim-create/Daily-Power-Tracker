@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Daily Power Tracker V6.0</title>
+<title>Daily Power Tracker V7.0</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -328,8 +328,8 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   .nav-tabs,.pdf-btn,.period-tabs,.reset-btn,.autosave-bar,.milestones-wrap,.streak-row,.backup-panel,#tab-daily,.confetti-container,.modal-overlay{display:none!important;}
   body{background:#0a0c10!important;color:#e8eaf0!important;padding:0!important;}
   .container{max-width:100%!important;padding:8mm 12mm;}
-  #tab-weekly,#tab-monthly{display:block!important;}
-  #tab-weekly[style*="display:none"],#tab-monthly[style*="display:none"]{display:none!important;}
+  #tab-weekly,#tab-monthly,#tab-dashboard{display:block!important;}
+  #tab-weekly[style*="display:none"],#tab-monthly[style*="display:none"],#tab-dashboard[style*="display:none"]{display:none!important;}
   .stats-grid{grid-template-columns:repeat(4,1fr)!important;}
   .stat-card{background:#161a22!important;border:1px solid #1f2535!important;break-inside:avoid;}
   .stat-value{color:#f5c842!important;}
@@ -433,6 +433,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 <div class="container">
   <div class="nav-tabs">
     <button class="nav-tab active" onclick="switchTab('daily')">📋 Daily</button>
+    <button class="nav-tab" onclick="switchTab('dashboard')">🧠 Dashboard</button>
     <button class="nav-tab" onclick="switchTab('weekly')">📅 Weekly</button>
     <button class="nav-tab" onclick="switchTab('monthly')">📊 Monthly</button>
     <button class="nav-tab" onclick="switchTab('vault')">⚠️ Vault</button>
@@ -449,7 +450,11 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
       </div>
     </div>
 
-    <div class="autosave-bar">
+    <div class="retro-entry-bar" style="background:var(--card);border:1px solid rgba(245,200,66,.25);border-radius:13px;padding:11px 13px;margin-bottom:14px;">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div><div style="font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;">🕰️ RETROSPECTIVE ENTRY</div><div id="entry-date-status" style="font-size:10px;color:var(--muted);margin-top:3px;">Editing today</div></div><div style="display:flex;align-items:center;gap:6px;"><input id="entry-date-picker" type="date" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:6px 7px;font:11px 'Outfit',sans-serif;"><button class="manage-tasks-btn" onclick="loadEntryDate()">Load</button></div></div>
+<button id="return-today-btn" class="manage-tasks-btn" style="display:none;margin-top:8px;" onclick="loadEntryDate(todayKey())">↩ Back to Today</button></div>
+
+<div class="autosave-bar">
       <div class="autosave-dot" id="as-dot"></div>
       <span class="autosave-text" id="as-text">Autosave ON</span>
     </div>
@@ -593,7 +598,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
       <textarea class="reflection-field" id="focus" rows="2" placeholder="🎯 Tomorrow's focus..."></textarea>
     </div>
 
-    <button class="save-day-btn" onclick="saveDay()">💾 Save Today's Progress to History</button>
+    <button class="save-day-btn" onclick="saveDay()">💾 Save Progress to History</button>
     <div class="quote">"Small daily wins = big life results."</div>
 
     <!-- BACKUP -->
@@ -622,6 +627,17 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
     </div>
   </div><!-- end daily -->
 
+  <!-- ══ V7 COMEBACK DASHBOARD ══ -->
+  <div id="tab-dashboard" style="display:none">
+    <div class="analytics-panel">
+      <div class="analytics-header">
+        <div class="analytics-title">🧠 Comeback Intelligence Dashboard</div>
+        <div class="analytics-sub">Your long-term pattern, not just today's score</div>
+      </div>
+      <div id="dashboard-content"></div>
+    </div>
+  </div>
+
   <!-- ══ WEEKLY TAB ══ -->
   <div id="tab-weekly" style="display:none">
     <div class="analytics-panel">
@@ -635,7 +651,8 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
         <button class="period-tab" onclick="showWeek(-1,this)">Last Week</button>
         <button class="period-tab" onclick="showWeek(-2,this)">2 Wks Ago</button>
       </div>
-      <div id="weekly-content"></div>
+      <div class="reflection-section" style="margin-top:14px;"><div class="section-title">🧠 Weekly Qualitative Review</div><div style="font-size:10px;color:var(--muted);margin-bottom:8px;">Paste your weekly qualitative report here. It is saved to your cloud history.</div><textarea class="reflection-field" id="weekly-qualitative-report" rows="7" placeholder="Weekly qualitative report..."></textarea><button class="save-day-btn" style="margin-top:8px;" onclick="saveWeeklyQualitativeReport()">☁️ Save Weekly Report</button><div id="weekly-report-status" style="font-size:10px;color:var(--green);text-align:center;margin-top:6px;"></div></div>
+<div id="weekly-content"></div>
     </div>
   </div>
 
@@ -873,6 +890,8 @@ async function pushTargetsToApi(){
 
 async function syncTodayFromApi(){
   try{
+    await pushAllLocalHistoryToApi();
+    await syncHistoryFromApi();
     const data=await dptApi('today','GET');
     const key=todayKey();
 
@@ -937,9 +956,40 @@ async function syncTodayFromApi(){
   }catch(e){console.warn('DPT API sync unavailable:',e.message);return null;}
 }
 
+async function pushHistoryDayToApi(dateKey, entry){
+  try{
+    if(!entry) return null;
+    return await dptApi('history','POST',{date:dateKey,payload:entry});
+  }catch(e){console.warn('DPT history push unavailable:',e.message);return null;}
+}
+
+async function pushAllLocalHistoryToApi(){
+  try{
+    const history=getStorage();
+    const entries=Object.entries(history).filter(([date,payload])=>/^\d{4}-\d{2}-\d{2}$/.test(date)&&payload&&typeof payload==='object').map(([date,payload])=>({date,payload}));
+    if(!entries.length)return null;
+    return await dptApi('history','POST',{entries});
+  }catch(e){console.warn('DPT full history migration unavailable:',e.message);return null;}
+}
+
+async function syncHistoryFromApi(){
+  try{
+    const data=await dptApi('history','GET');
+    if(!data||!Array.isArray(data.history)) return data;
+    const history=getStorage();
+    data.history.forEach(row=>{
+      if(row?.history_date && row.payload) history[row.history_date]=row.payload;
+    });
+    setStorage(history);
+    updateStreaks();
+    return data;
+  }catch(e){console.warn('DPT history restore unavailable:',e.message);return null;}
+}
+
 async function pushTodayToApi(){
   try{
-    const history=getStorage()[todayKey()]||{};
+    const entryDate=activeEntryDate||todayKey();
+    const history=getStorage()[entryDate]||{};
     const targets=loadDailyTargets().targets||{};
     const rows=TASKS.filter(t=>t.active).map(t=>({
       task_id:t.id,task_name:t.name,target_hours:Number(targets[t.id]||0),
@@ -947,7 +997,7 @@ async function pushTodayToApi(){
     }));
     const result=await dptApi('results','POST',{date:todayKey(),results:rows});
     const waste=parseFloat(document.getElementById('waste-today-input')?.value)||0;
-    if(waste>0) await dptApi('waste','POST',{date:todayKey(),category:'General',minutes:Math.round(waste*60),notes:'Daily tracker waste total'});
+    if(waste>0) await dptApi('waste','POST',{date:entryDate,category:'General',minutes:Math.round(waste*60),notes:'Daily tracker waste total'});
     return result;
   }catch(e){console.warn('DPT API push unavailable:',e.message);return null;}
 }
@@ -982,6 +1032,7 @@ function getActiveTasks() {
 let state = {};
 TASKS.forEach(t => state[t.id] = false);
 let extraTasks = [], extraIdCounter = 0;
+let activeEntryDate = todayKey();
 
 // ══════════════════════════════════════════════════════
 //  STORAGE
@@ -1463,10 +1514,41 @@ function resetAll(){
 }
 
 // ══════════════════════════════════════════════════════
+// RETROSPECTIVE ENTRY + WEEKLY QUALITATIVE REPORT
+// ══════════════════════════════════════════════════════
+function updateEntryDateUI(){
+ const p=document.getElementById('entry-date-picker'),st=document.getElementById('entry-date-status'),back=document.getElementById('return-today-btn');
+ if(p)p.value=activeEntryDate||todayKey();
+ if(st){st.textContent=activeEntryDate===todayKey()?'Editing today':'Editing past date: '+activeEntryDate;st.style.color=activeEntryDate===todayKey()?'var(--muted)':'var(--amber)';}
+ if(back)back.style.display=activeEntryDate===todayKey()?'none':'inline-flex';
+}
+async function loadEntryDate(date){
+ const key=date||document.getElementById('entry-date-picker')?.value;if(!key)return;
+ if(key>todayKey()){alert('Future dates cannot be entered.');return;}
+ activeEntryDate=key; const local=getStorage()[key]||{};
+ TASKS.forEach(t=>state[t.id]=Boolean(local.tasks?.[t.id]));
+ renderTaskCards();
+ TASKS.forEach(t=>{const el=document.getElementById('hrs-'+t.id);if(el)el.value=Number(local.taskHours?.[t.id]||0);});
+ const win=document.getElementById('win'),focus=document.getElementById('focus');if(win)win.value=local.win||'';if(focus)focus.value=local.focus||'';
+ try{const data=await dptApi('today','GET',{date:key});if(data?.results?.length){data.results.forEach(r=>{if(r?.task_id in state)state[r.task_id]=Boolean(r.completed);const el=document.getElementById('hrs-'+r.task_id);if(el)el.value=Number(r.actual_hours)||0;});}if(data?.reflection){if(win)win.value=data.reflection.win||win.value||'';if(focus)focus.value=data.reflection.focus||focus.value||'';}}catch(e){}
+ renderTaskCards();updateUI();updateStreaks();updateEntryDateUI();
+ const btn=document.querySelector('.save-day-btn');if(btn)btn.textContent=activeEntryDate===todayKey()?'💾 Save Progress to History':'💾 Save Past Date to History';
+}
+function saveWeeklyQualitativeReport(){
+ const tabs=document.querySelectorAll('#tab-weekly .period-tab');const active=[...tabs].findIndex(x=>x.classList.contains('active'));const offset=active===1?-1:active===2?-2:0;
+ const now=new Date(),day=now.getDay(),m=new Date(now);m.setDate(now.getDate()-((day===0?7:day)-1)+offset*7);const key=getDateKey(m);
+ const report=document.getElementById('weekly-qualitative-report')?.value.trim()||'',h=getStorage(),existing=h[key]||{};h[key]={...existing,weeklyQualitativeReport:report,weeklyReportStart:key};setStorage(h);pushHistoryDayToApi(key,h[key]);
+ const st=document.getElementById('weekly-report-status');if(st){st.textContent='☁️ Weekly report saved';setTimeout(()=>st.textContent='',2200);}
+}
+function loadWeeklyQualitativeReport(offset){
+ const now=new Date(),day=now.getDay(),m=new Date(now);m.setDate(now.getDate()-((day===0?7:day)-1)+(offset||0)*7);const key=getDateKey(m),h=getStorage()[key]||{},el=document.getElementById('weekly-qualitative-report');if(el)el.value=h.weeklyQualitativeReport||'';
+}
+
+// ══════════════════════════════════════════════════════
 //  SAVE TO HISTORY
 // ══════════════════════════════════════════════════════
 function saveDay(){
-  const key=todayKey(),history=getStorage();
+  const key=activeEntryDate||todayKey(),history=getStorage();
   const score=calcScore(),totalHrs=calcTotalTime();
   const taskHours={};getActiveTasks().forEach(t=>{taskHours[t.id]=state[t.id]?getHrs(t.id):0;});
   const taskSnapshot=getActiveTasks().map(t=>({id:t.id,icon:t.icon,name:t.name,done:state[t.id]||false}));
@@ -1483,22 +1565,69 @@ function saveDay(){
     energy:document.getElementById('energy-select')?.value||'',
   };
   setStorage(history);
+  pushHistoryDayToApi(key, history[key]);
   const btn=document.querySelector('.save-day-btn');
-  btn.textContent='✅ Saved to History!';btn.style.background='linear-gradient(135deg,#3ddc84,#2bc470)';
+  btn.textContent=key===todayKey()?'✅ Saved to History!':'✅ Past Date Saved!';btn.style.background='linear-gradient(135deg,#3ddc84,#2bc470)';
   setTimeout(()=>{btn.textContent="💾 Save Today's Progress to History";btn.style.background='';},2200);
   updateStreaks();
+  if(document.getElementById('tab-dashboard')?.style.display!=='none') renderDashboard();
   pushTodayToApi();
 }
+
+// ══════════════════════════════════════════════════════
+//  V7 COMEBACK INTELLIGENCE DASHBOARD
+// ══════════════════════════════════════════════════════
+function renderDashboard(){
+  const history=getStorage();
+  const keys=Object.keys(history).filter(k=>/^\d{4}-\d{2}-\d{2}$/.test(k)&&history[k]&&typeof history[k]==='object').sort();
+  const el=document.getElementById('dashboard-content'); if(!el)return;
+  if(!keys.length){el.innerHTML=`<div class="no-data"><div class="no-data-icon">🧭</div>Save a few days and your comeback patterns will appear here.</div>`;return;}
+  const entries=keys.map(k=>({k,d:history[k]}));
+  const logged=entries.length, totalHours=entries.reduce((a,x)=>a+(Number(x.d.totalHrs)||0),0);
+  const avgPct=Math.round(entries.reduce((a,x)=>a+((Number(x.d.score)||0)/(Number(x.d.maxScore)||50)*100),0)/logged);
+  const avgHours=totalHours/logged;
+  const perfect=entries.filter(x=>(Number(x.d.score)||0)>=(Number(x.d.maxScore)||50)).length;
+  const last7=entries.slice(-7), last7Pct=last7.length?Math.round(last7.reduce((a,x)=>a+((Number(x.d.score)||0)/(Number(x.d.maxScore)||50)*100),0)/last7.length):0;
+  const taskStats={};
+  entries.forEach(({d})=>{
+    const snap=d.taskSnapshot||TASKS.map(t=>({id:t.id,name:t.name,done:d.tasks&&d.tasks[t.id]}));
+    snap.forEach(t=>{if(!taskStats[t.id])taskStats[t.id]={name:t.name,done:0,total:0};taskStats[t.id].total++;if(t.done)taskStats[t.id].done++;});
+  });
+  const ranked=Object.values(taskStats).sort((a,b)=>(b.done/b.total)-(a.done/a.total));
+  const best=ranked[0], weakest=ranked[ranked.length-1];
+  const recentReports=entries.filter(x=>x.d.weeklyQualitativeReport).slice(-4).reverse();
+  const status=avgPct>=80?'🔥 Excellent momentum':avgPct>=60?'💪 Solid comeback':'⚠️ Consistency needs attention';
+  el.innerHTML=`
+  <div style="font-size:13px;font-weight:700;color:var(--gold);margin-bottom:10px;">${status}</div>
+  <div class="hours-report"><div class="chart-title">📌 Overall Snapshot</div>
+    <div class="hours-stat-row"><span class="hours-stat-label">Days logged</span><span class="hours-stat-val">${logged}</span></div>
+    <div class="hours-stat-row"><span class="hours-stat-label">Average performance</span><span class="hours-stat-val">${avgPct}%</span></div>
+    <div class="hours-stat-row"><span class="hours-stat-label">Last 7 logged days</span><span class="hours-stat-val">${last7Pct}%</span></div>
+    <div class="hours-stat-row"><span class="hours-stat-label">Total productive hours</span><span class="hours-stat-val">${totalHours.toFixed(1)}h</span></div>
+    <div class="hours-stat-row"><span class="hours-stat-label">Average productive hours/day</span><span class="hours-stat-val">${avgHours.toFixed(1)}h</span></div>
+    <div class="hours-stat-row"><span class="hours-stat-label">Perfect-score days</span><span class="hours-stat-val">${perfect}</span></div>
+  </div>
+  <div class="hours-report"><div class="chart-title">🎯 Task Pattern</div>
+    ${best?`<div class="hours-stat-row"><span class="hours-stat-label">Strongest task</span><span class="hours-stat-val">${escapeHtml(best.name)} — ${Math.round(best.done/best.total*100)}%</span></div>`:''}
+    ${weakest?`<div class="hours-stat-row"><span class="hours-stat-label">Needs attention</span><span class="hours-stat-val">${escapeHtml(weakest.name)} — ${Math.round(weakest.done/weakest.total*100)}%</span></div>`:''}
+  </div>
+  <div class="hours-report"><div class="chart-title">🧠 Recent Weekly Reviews</div>
+    ${recentReports.length?recentReports.map(x=>{const dt=new Date(x.k+'T00:00:00');return `<div style="border-top:1px solid var(--border);padding:9px 0;font-size:11px;line-height:1.55;"><div style="color:var(--gold);font-weight:700;margin-bottom:3px;">Week of ${dt.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</div><div style="white-space:pre-wrap;color:var(--text);">${escapeHtml(x.d.weeklyQualitativeReport)}</div></div>`}).join(''):`<div style="font-size:11px;color:var(--muted);">No weekly qualitative reviews saved yet.</div>`}
+  </div>`;
+}
+
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ══════════════════════════════════════════════════════
 //  TABS
 // ══════════════════════════════════════════════════════
 function switchTab(tab){
-  ['daily','weekly','monthly','vault','diary'].forEach(t=>{
+  ['daily','dashboard','weekly','monthly','vault','diary'].forEach(t=>{
     document.getElementById('tab-'+t).style.display=t===tab?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i)=>
-    el.classList.toggle('active',['daily','weekly','monthly','vault','diary'][i]===tab));
+    el.classList.toggle('active',['daily','dashboard','weekly','monthly','vault','diary'][i]===tab));
+  if(tab==='dashboard') renderDashboard();
   if(tab==='weekly') showWeek(0,document.querySelectorAll('#tab-weekly .period-tab')[0]);
   if(tab==='monthly') showMonth(0,document.querySelectorAll('#tab-monthly .period-tab')[0]);
   if(tab==='vault') renderVault();
@@ -1715,6 +1844,7 @@ function buildWeeklyBreakdownForMonth(days, history){
 }
 
 function showWeek(offset,btn){
+  loadWeeklyQualitativeReport(offset);
   if(btn){document.querySelectorAll('#tab-weekly .period-tab').forEach(el=>el.classList.remove('active'));btn.classList.add('active');}
   const history=getStorage(),now=new Date(),day=now.getDay(),monday=new Date(now);
   monday.setDate(now.getDate()-((day===0?7:day)-1)+offset*7);
@@ -1939,6 +2069,7 @@ restoreDraft();
 restoreWasteToday();
 updateUI();
 updateStreaks();
+updateEntryDateUI();
 refreshAuthState();
 
 // Hook reflection fields for autosave
