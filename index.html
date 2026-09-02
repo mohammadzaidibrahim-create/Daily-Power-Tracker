@@ -852,11 +852,11 @@ function setAuthUI(session){
     const email=session.user.email||'Authenticated';
     status.textContent='☁️ Synced: '+email; status.className='auth-status ok';
     btn.textContent='Sign Out'; btn.onclick=authSignOut;
-    saveApiConfig({baseUrl:SUPABASE_URL+'/functions/v1/daily-power-tracker',token:session.access_token});
+    saveApiConfig({baseUrl:SUPABASE_URL+'/functions/v1/daily-power-tracker-v7',token:session.access_token});
   }else{
     status.textContent='🔒 Cloud sync not connected'; status.className='auth-status';
     btn.textContent='🔐 Sign In'; btn.onclick=openAuthModal;
-    saveApiConfig({baseUrl:SUPABASE_URL+'/functions/v1/daily-power-tracker'});
+    saveApiConfig({baseUrl:SUPABASE_URL+'/functions/v1/daily-power-tracker-v7'});
   }
 }
 
