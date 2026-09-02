@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Daily Power Tracker V7.0</title>
+<title>Daily Power Tracker V7.1</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -712,11 +712,12 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 //  CONSTANTS & DEFAULTS
 // ══════════════════════════════════════════════════════
 const DEFAULT_TASKS = [
-  {id:'quran', icon:'📖', name:'Quran Hifz Revision',      defaultHrs:1,   color:'#b39ddb', hideSunday:false, active:true, weeklyTarget:7},
-  {id:'ugc',   icon:'🎓', name:'UGC NET JRF Study',         defaultHrs:2.5, color:'#4fc3f7', hideSunday:false, active:true, weeklyTarget:17.5},
-  {id:'yt',    icon:'🎥', name:'YouTube Content & Recording',defaultHrs:2,   color:'#ff7043', hideSunday:false, active:true, weeklyTarget:14},
-  {id:'arabic',icon:'🌙', name:'Arabic Language Course',    defaultHrs:1.5, color:'#3ddc84', hideSunday:false, active:true, weeklyTarget:10.5},
-  {id:'gym',   icon:'💪', name:'Gym & Fitness',             defaultHrs:1,   color:'#ffb347', hideSunday:true,  active:true, weeklyTarget:6},
+  {id:'quran', icon:'📖', name:'Quran Hifz Revision',          defaultHrs:1,   color:'#b39ddb', hideSunday:false, active:true, weeklyTarget:7},
+  {id:'ugc',   icon:'🎓', name:'UGC NET JRF Study',             defaultHrs:2.5, color:'#4fc3f7', hideSunday:false, active:true, weeklyTarget:17.5},
+  {id:'yt',    icon:'🎥', name:'YouTube Content & Recording',   defaultHrs:2,   color:'#ff7043', hideSunday:false, active:true, weeklyTarget:14},
+  {id:'arabic',icon:'🌙', name:'Arabic Language Course',        defaultHrs:1.5, color:'#3ddc84', hideSunday:false, active:true, weeklyTarget:10.5},
+  {id:'gym',   icon:'💪', name:'Gym & Fitness',                 defaultHrs:1,   color:'#ffb347', hideSunday:true,  active:true, weeklyTarget:6},
+  {id:'prepverse',icon:'🚀', name:'PrepVerse Platform Expansion',defaultHrs:0.5,color:'#26c6da',hideSunday:false,active:true,weeklyTarget:3.5},
 ];
 
 const TASK_COLORS = ['#b39ddb','#4fc3f7','#ff7043','#3ddc84','#ffb347','#e879f9','#26c6da','#f48fb1'];
@@ -792,14 +793,28 @@ function closeDailyTargetsEditor(){const m=document.getElementById('daily-target
 function saveDailyTargetsFromEditor(){
   const ed=document.getElementById('daily-targets-editor'); if(!ed)return;
   const targets={};
+  let added=0;
   ed.value.split(/\n/).forEach(line=>{
     const m=line.match(/^(.+?)\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$/); if(!m)return;
-    const name=m[1].trim().toLowerCase(); const hrs=parseFloat(m[2]);
-    const task=TASKS.find(t=>t.name.trim().toLowerCase()===name || t.id.toLowerCase()===name);
-    if(task&&hrs>=0&&hrs<=24)targets[task.id]=hrs;
+    const rawName=m[1].trim(); const name=rawName.toLowerCase(); const hrs=parseFloat(m[2]);
+    if(hrs<0||hrs>24)return;
+    let task=TASKS.find(t=>t.name.trim().toLowerCase()===name || t.id.toLowerCase()===name);
+    // If the user enters a genuinely new task here, create it automatically so
+    // Edit Targets can be used for both editing AND adding accountability tasks.
+    if(!task){
+      const baseId=name.replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') || ('task_'+Date.now());
+      let id=baseId, n=2;
+      while(TASKS.some(t=>t.id===id)){ id=baseId+'_'+n++; }
+      task={id,icon:'🎯',name:rawName,defaultHrs:hrs,color:TASK_COLORS[TASKS.length%TASK_COLORS.length],hideSunday:false,active:true,weeklyTarget:Math.round(hrs*7*10)/10};
+      TASKS.push(task); state[task.id]=false; saveTasks(TASKS); added++;
+    }
+    targets[task.id]=hrs;
   });
-  setDailyTargets(targets,todayKey(),'manual'); closeDailyTargetsEditor();
-  showBkpStatus('🎯 Daily targets saved!','ok');
+  setDailyTargets(targets,todayKey(),'manual');
+  renderTaskCards();
+  renderDailyTargets();
+  closeDailyTargetsEditor();
+  showBkpStatus(added ? `🎯 Targets saved • ${added} new task added!` : '🎯 Daily targets saved!','ok');
 }
 function clearDailyTargets(){
   const all=getAllDailyTargets(); delete all[todayKey()]; saveDailyTargetsMap(all); renderDailyTargets(); closeDailyTargetsEditor();
@@ -1009,7 +1024,12 @@ function loadTasks() {
   try {
     const saved = JSON.parse(localStorage.getItem(TASKS_KEY));
     if(saved && Array.isArray(saved) && saved.length){
-      return saved.map(t => ({active:true, weeklyTarget:Math.round((t.defaultHrs||1)*7*10)/10, ...t}));
+      const merged = saved.map(t => ({active:true, weeklyTarget:Math.round((t.defaultHrs||1)*7*10)/10, ...t}));
+      // Keep user-created tasks, but automatically add built-in tasks that were introduced later.
+      DEFAULT_TASKS.forEach(def => {
+        if(!merged.some(t => t.id===def.id)){ merged.push({...def}); }
+      });
+      return merged;
     }
   } catch(e){}
   return DEFAULT_TASKS.map(t => ({...t}));
@@ -2082,7 +2102,7 @@ refreshAuthState();
 <div id="daily-targets-modal" class="modal-overlay" style="display:none;">
   <div class="modal" style="max-width:520px;">
     <div class="modal-head"><div class="modal-title">🎯 Set Today's Targets</div><button class="modal-close" onclick="closeDailyTargetsEditor()">✕</button></div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Enter one line per task: <b>Task Name = hours</b>. Example: <b>Quran Hifz Revision = 0.5</b></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Enter one line per task: <b>Task Name = hours</b>. You can also type a NEW task here and it will be added automatically. Example: <b>PrepVerse Platform Expansion = 0.5</b></div>
     <textarea id="daily-targets-editor" style="width:100%;min-height:220px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font:12px Outfit,sans-serif;resize:vertical;"></textarea>
     <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
       <button class="manage-tasks-btn" onclick="clearDailyTargets()">Clear</button>
