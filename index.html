@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
   --bg:#0a0c10; --surface:#111318; --card:#161a22; --border:#1f2535;
@@ -336,10 +337,44 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   .hours-stat-row{border-color:#1f2535!important;}
   @page{size:A4;margin:10mm 8mm;}
 }
+
+/* SUPABASE AUTH */
+.auth-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:9px 12px;}
+.auth-status{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.auth-status.ok{color:var(--green);}
+.auth-btn{background:none;border:1px solid rgba(79,195,247,.35);color:var(--blue);font-family:'Outfit',sans-serif;font-size:10px;font-weight:700;padding:5px 10px;border-radius:18px;cursor:pointer;white-space:nowrap;}
+.auth-btn:hover{background:rgba(79,195,247,.08);border-color:var(--blue);}
+.auth-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9999;align-items:center;justify-content:center;padding:18px;}
+.auth-box{width:min(420px,100%);background:var(--card);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+.auth-box h3{font-size:16px;color:var(--gold);margin-bottom:6px;}
+.auth-help{font-size:10px;color:var(--muted);line-height:1.5;margin-bottom:14px;}
+.auth-input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:'Outfit',sans-serif;font-size:12px;padding:9px 10px;margin-bottom:9px;outline:none;}
+.auth-input:focus{border-color:var(--blue);}
+.auth-actions{display:flex;gap:8px;margin-top:4px;}
+.auth-primary{flex:1;background:linear-gradient(135deg,var(--blue),#2f9ed0);border:none;color:#061018;font-family:'Outfit',sans-serif;font-weight:700;font-size:11px;padding:9px;border-radius:9px;cursor:pointer;}
+.auth-secondary{background:none;border:1px solid var(--border);color:var(--muted);font-family:'Outfit',sans-serif;font-size:11px;padding:9px 12px;border-radius:9px;cursor:pointer;}
+.auth-msg{font-size:10px;line-height:1.4;margin-top:10px;min-height:15px;color:var(--muted);}
+.auth-msg.error{color:#ff8b8b;} .auth-msg.success{color:var(--green);}
 </style>
 </head>
 <body>
 <div class="confetti-container" id="confetti"></div>
+
+<!-- SUPABASE AUTH MODAL -->
+<div class="auth-modal" id="auth-modal">
+  <div class="auth-box">
+    <h3>🔐 Sync & Accountability Login</h3>
+    <div class="auth-help">Sign in to sync your Daily Power Tracker with Supabase. Your password stays inside Supabase Auth and is never sent to ChatGPT.</div>
+    <input class="auth-input" id="auth-email" type="email" autocomplete="email" placeholder="Email address">
+    <input class="auth-input" id="auth-password" type="password" autocomplete="current-password" placeholder="Password (min. 6 characters)">
+    <div class="auth-actions">
+      <button class="auth-primary" onclick="authSignIn()">Sign In</button>
+      <button class="auth-secondary" onclick="authSignUp()">Create Account</button>
+      <button class="auth-secondary" onclick="closeAuthModal()">×</button>
+    </div>
+    <div class="auth-msg" id="auth-msg"></div>
+  </div>
+</div>
 
 <!-- ══ MANAGE TASKS MODAL ══ -->
 <div class="modal-overlay" id="tasks-modal">
@@ -417,6 +452,11 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
     <div class="autosave-bar">
       <div class="autosave-dot" id="as-dot"></div>
       <span class="autosave-text" id="as-text">Autosave ON</span>
+    </div>
+
+    <div class="auth-bar">
+      <span class="auth-status" id="auth-status">🔒 Cloud sync not connected</span>
+      <button class="auth-btn" id="auth-btn" onclick="openAuthModal()">🔐 Sign In</button>
     </div>
 
     <!-- ENERGY SELECTOR -->
@@ -701,7 +741,7 @@ function setDailyTargets(targets, date=todayKey(), source='local'){
   const all=getAllDailyTargets();
   all[date]={targets:{...targets},updatedAt:new Date().toISOString(),source};
   saveDailyTargetsMap(all);
-  if(date===todayKey()) renderDailyTargets();
+  if(date===todayKey()){ renderDailyTargets(); if(source!=='api') pushTargetsToApi(); }
 }
 function getTodayTargetHours(id){
   const d=loadDailyTargets();
@@ -747,25 +787,113 @@ function saveDailyTargetsFromEditor(){
 function clearDailyTargets(){
   const all=getAllDailyTargets(); delete all[todayKey()]; saveDailyTargetsMap(all); renderDailyTargets(); closeDailyTargetsEditor();
 }
-function getApiConfig(){try{return JSON.parse(localStorage.getItem(API_CONFIG_KEY)||'{}');}catch(e){return {};}}
-function saveApiConfig(cfg){try{localStorage.setItem(API_CONFIG_KEY,JSON.stringify(cfg));}catch(e){}}
-async function dptApi(path,method='GET',body=null){
-  const cfg=getApiConfig(); if(!cfg.baseUrl) throw new Error('API base URL not configured');
-  const res=await fetch(cfg.baseUrl.replace(/\/$/,'')+path,{method,headers:{'Content-Type':'application/json',...(cfg.token?{'Authorization':'Bearer '+cfg.token}:{})},body:body?JSON.stringify(body):undefined});
-  if(!res.ok)throw new Error('API '+res.status); return res.json();
+const SUPABASE_URL = 'https://kyxuglbwxibgsimqlsqi.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_CEWDCyZcd_yzs8laEOSEMw_JWSWdozd';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { autoRefreshToken:true, persistSession:true, detectSessionInUrl:true }
+});
+
+function getApiConfig(){
+  try{return JSON.parse(localStorage.getItem(API_CONFIG_KEY)||'{}');}catch(e){return {};}
 }
+function saveApiConfig(cfg){try{localStorage.setItem(API_CONFIG_KEY,JSON.stringify(cfg));}catch(e){}}
+
+function openAuthModal(){const m=document.getElementById('auth-modal');if(m)m.style.display='flex';document.getElementById('auth-email')?.focus();}
+function closeAuthModal(){const m=document.getElementById('auth-modal');if(m)m.style.display='none';}
+function setAuthMsg(msg,type=''){const el=document.getElementById('auth-msg');if(el){el.textContent=msg;el.className='auth-msg'+(type?' '+type:'');}}
+
+async function authSignIn(){
+  const email=document.getElementById('auth-email')?.value.trim();
+  const password=document.getElementById('auth-password')?.value||'';
+  if(!email||!password){setAuthMsg('Enter your email and password.','error');return;}
+  setAuthMsg('Signing in…');
+  const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});
+  if(error){setAuthMsg(error.message,'error');return;}
+  setAuthUI(data.session);
+  setAuthMsg('Signed in successfully.','success');
+  setTimeout(closeAuthModal,500);
+  await syncTodayFromApi();
+}
+
+async function authSignUp(){
+  const email=document.getElementById('auth-email')?.value.trim();
+  const password=document.getElementById('auth-password')?.value||'';
+  if(!email||password.length<6){setAuthMsg('Enter a valid email and a password of at least 6 characters.','error');return;}
+  setAuthMsg('Creating your account…');
+  const {data,error}=await supabaseClient.auth.signUp({email,password,options:{emailRedirectTo:location.href}});
+  if(error){setAuthMsg(error.message,'error');return;}
+  if(data.session){setAuthUI(data.session);setAuthMsg('Account created and signed in.','success');setTimeout(closeAuthModal,700);await syncTodayFromApi();}
+  else setAuthMsg('Account created. Check your email to confirm, then sign in.','success');
+}
+
+async function authSignOut(){await supabaseClient.auth.signOut();setAuthUI(null);}
+
+function setAuthUI(session){
+  const status=document.getElementById('auth-status'),btn=document.getElementById('auth-btn');
+  if(!status||!btn)return;
+  if(session?.user){
+    const email=session.user.email||'Authenticated';
+    status.textContent='☁️ Synced: '+email; status.className='auth-status ok';
+    btn.textContent='Sign Out'; btn.onclick=authSignOut;
+    saveApiConfig({baseUrl:SUPABASE_URL+'/functions/v1/daily-power-tracker',token:session.access_token});
+  }else{
+    status.textContent='🔒 Cloud sync not connected'; status.className='auth-status';
+    btn.textContent='🔐 Sign In'; btn.onclick=openAuthModal;
+    saveApiConfig({baseUrl:SUPABASE_URL+'/functions/v1/daily-power-tracker'});
+  }
+}
+
+async function refreshAuthState(){
+  const {data}=await supabaseClient.auth.getSession();
+  setAuthUI(data.session);
+  if(data.session) await syncTodayFromApi();
+}
+
+supabaseClient.auth.onAuthStateChange((_event,session)=>{
+  setAuthUI(session);
+});
+
+async function dptApi(action,method='GET',body=null){
+  const cfg=getApiConfig();
+  if(!cfg.baseUrl||!cfg.token) throw new Error('Not authenticated');
+  const url=cfg.baseUrl+'?action='+encodeURIComponent(action)+(body?.date?'&date='+encodeURIComponent(body.date):'');
+  const res=await fetch(url,{method,headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.token,'apikey':SUPABASE_PUBLISHABLE_KEY},body:body?JSON.stringify(body):undefined});
+  if(!res.ok){let msg='API '+res.status;try{const j=await res.json();if(j.error)msg=j.error;}catch(e){}throw new Error(msg);}
+  return res.json();
+}
+
+async function pushTargetsToApi(){
+  try{
+    const targets=loadDailyTargets().targets||{};
+    const rows=Object.entries(targets).map(([task_id,target_hours])=>{const t=TASKS.find(x=>x.id===task_id);return {task_id,task_name:t?.name||task_id,target_hours,is_required:true};});
+    return await dptApi('targets','POST',{date:todayKey(),targets:rows});
+  }catch(e){console.warn('DPT target sync unavailable:',e.message);return null;}
+}
+
 async function syncTodayFromApi(){
   try{
-    const data=await dptApi('/tracker/state?date='+encodeURIComponent(todayKey()));
-    if(data&&data.targets)setDailyTargets(data.targets,todayKey(),'api');
+    const data=await dptApi('today','GET');
+    if(data&&Array.isArray(data.targets)){
+      const targets={};
+      data.targets.forEach(t=>{targets[t.task_id]=Number(t.target_hours)||0;});
+      if(Object.keys(targets).length)setDailyTargets(targets,todayKey(),'api');
+    }
     return data;
   }catch(e){console.warn('DPT API sync unavailable:',e.message);return null;}
 }
+
 async function pushTodayToApi(){
   try{
-    const history=getStorage()[todayKey()]||null; const targets=loadDailyTargets().targets||{};
+    const history=getStorage()[todayKey()]||{};
+    const targets=loadDailyTargets().targets||{};
+    const rows=TASKS.filter(t=>t.active).map(t=>({
+      task_id:t.id,task_name:t.name,target_hours:Number(targets[t.id]||0),
+      actual_hours:history.taskHours?.[t.id]||0,completed:Boolean(history.tasks?.[t.id])
+    }));
+    const result=await dptApi('results','POST',{date:todayKey(),results:rows});
     const waste=parseFloat(document.getElementById('waste-today-input')?.value)||0;
-    return await dptApi('/tracker/result','POST',{date:todayKey(),targets,result:history,waste});
+    if(waste>0) await dptApi('waste','POST',{date:todayKey(),category:'General',minutes:Math.round(waste*60),notes:'Daily tracker waste total'});
+    return result;
   }catch(e){console.warn('DPT API push unavailable:',e.message);return null;}
 }
 
