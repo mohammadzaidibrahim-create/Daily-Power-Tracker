@@ -851,6 +851,7 @@ async function refreshAuthState(){
 
 supabaseClient.auth.onAuthStateChange((_event,session)=>{
   setAuthUI(session);
+  if(session) setTimeout(()=>syncTodayFromApi(),0);
 });
 
 async function dptApi(action,method='GET',body=null){
@@ -873,11 +874,65 @@ async function pushTargetsToApi(){
 async function syncTodayFromApi(){
   try{
     const data=await dptApi('today','GET');
+    const key=todayKey();
+
+    // Restore daily targets from cloud.
     if(data&&Array.isArray(data.targets)){
       const targets={};
       data.targets.forEach(t=>{targets[t.task_id]=Number(t.target_hours)||0;});
-      if(Object.keys(targets).length)setDailyTargets(targets,todayKey(),'api');
+      if(Object.keys(targets).length)setDailyTargets(targets,key,'api');
     }
+
+    // Restore today's task completion + actual hours from cloud.
+    // This is what makes the tracker portable across browsers/devices.
+    if(data&&Array.isArray(data.results)){
+      const cloudTasks={};
+      const cloudHours={};
+      data.results.forEach(r=>{
+        if(!r||!r.task_id)return;
+        cloudTasks[r.task_id]=Boolean(r.completed);
+        cloudHours[r.task_id]=Number(r.actual_hours)||0;
+      });
+
+      if(Object.keys(cloudTasks).length){
+        TASKS.forEach(t=>{
+          if(Object.prototype.hasOwnProperty.call(cloudTasks,t.id)) state[t.id]=cloudTasks[t.id];
+        });
+
+        // Persist the cloud-restored state locally as well, so history, streaks
+        // and reports work immediately in this browser.
+        const history=getStorage();
+        const existing=history[key]||{};
+        const mergedTasks={...(existing.tasks||{})};
+        const mergedHours={...(existing.taskHours||{})};
+        Object.keys(cloudTasks).forEach(id=>{
+          mergedTasks[id]=cloudTasks[id];
+          mergedHours[id]=cloudHours[id];
+        });
+        history[key]={...existing,tasks:mergedTasks,taskHours:mergedHours,dailyTargets:(loadDailyTargets().targets||{})};
+        setStorage(history);
+
+        // Put the restored actual hours into the task inputs before rendering.
+        renderTaskCards();
+        TASKS.forEach(t=>{
+          const el=document.getElementById('hrs-'+t.id);
+          if(el&&Object.prototype.hasOwnProperty.call(cloudHours,t.id)) el.value=cloudHours[t.id]||0;
+        });
+        updateUI();
+        updateStreaks();
+      }
+    }
+
+    // Restore today's wasted-time value from cloud when available.
+    if(data&&Array.isArray(data.waste)){
+      const mins=data.waste.reduce((sum,w)=>sum+(Number(w.minutes)||0),0);
+      if(mins>0){
+        WASTE.log[key]=mins/60;
+        saveWasteData(WASTE);
+        restoreWasteToday();
+      }
+    }
+
     return data;
   }catch(e){console.warn('DPT API sync unavailable:',e.message);return null;}
 }
@@ -1879,12 +1934,12 @@ document.getElementById('energy-select').addEventListener('change',()=>{updateEn
 renderTaskCards();
 renderRatingsScale();
 renderDailyTargets();
-syncTodayFromApi();
 
 restoreDraft();
 restoreWasteToday();
 updateUI();
 updateStreaks();
+refreshAuthState();
 
 // Hook reflection fields for autosave
 ['win','focus'].forEach(id=>{
