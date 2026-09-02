@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Daily Power Tracker V5.0</title>
+<title>Daily Power Tracker V6.0</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -510,6 +510,16 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
       <button class="manage-tasks-btn" onclick="openTasksModal()">⚙️ Manage Tasks</button>
     </div>
     <div class="tasks-section" id="tasks-container"></div>
+    <div class="daily-targets-panel" style="margin:10px 0 16px;padding:14px;border:1px solid rgba(79,195,247,.25);border-radius:14px;background:linear-gradient(135deg,rgba(79,195,247,.06),rgba(179,157,219,.04));">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div>
+          <div class="section-title" style="margin:0;font-size:14px;">🎯 Today's Accountability Targets</div>
+          <div id="daily-targets-status" style="font-size:10px;color:var(--muted);margin-top:3px;">Local target plan • API sync optional</div>
+        </div>
+        <button class="manage-tasks-btn" onclick="openDailyTargetsEditor()">✏️ Edit Targets</button>
+      </div>
+      <div id="daily-targets-summary" style="margin-top:10px;font-size:11px;color:var(--text);"></div>
+    </div>
 
     <!-- COMBO BANNER -->
     <div class="combo-banner" id="combo-banner" style="display:none">
@@ -672,6 +682,92 @@ const RATINGS = [
 const HISTORY_KEY = 'dpt_v4';
 const DRAFT_KEY   = 'dpt_draft_v4';
 const TASKS_KEY   = 'dpt_custom_tasks_v4';
+const DAILY_TARGETS_KEY = 'dpt_daily_targets_v6';
+const API_CONFIG_KEY = 'dpt_api_config_v6';
+
+// ══════════════════════════════════════════════════════
+//  V6 DAILY ACCOUNTABILITY TARGETS + API SYNC LAYER
+// ══════════════════════════════════════════════════════
+function loadDailyTargets(){
+  try{
+    const all=JSON.parse(localStorage.getItem(DAILY_TARGETS_KEY)||'{}');
+    const t=all[todayKey()];
+    return (t&&typeof t==='object')?t:{};
+  }catch(e){return {};}
+}
+function saveDailyTargetsMap(map){try{localStorage.setItem(DAILY_TARGETS_KEY,JSON.stringify(map));}catch(e){}}
+function getAllDailyTargets(){try{return JSON.parse(localStorage.getItem(DAILY_TARGETS_KEY)||'{}');}catch(e){return {};}}
+function setDailyTargets(targets, date=todayKey(), source='local'){
+  const all=getAllDailyTargets();
+  all[date]={targets:{...targets},updatedAt:new Date().toISOString(),source};
+  saveDailyTargetsMap(all);
+  if(date===todayKey()) renderDailyTargets();
+}
+function getTodayTargetHours(id){
+  const d=loadDailyTargets();
+  return d.targets&&Number.isFinite(Number(d.targets[id]))?Number(d.targets[id]):null;
+}
+function targetLabel(t){
+  const h=getTodayTargetHours(t.id);
+  return h===null ? 'No daily target' : 'Target: '+fmtHrs(h);
+}
+function renderDailyTargets(){
+  const el=document.getElementById('daily-targets-summary');
+  const status=document.getElementById('daily-targets-status');
+  if(!el)return;
+  const d=loadDailyTargets(); const targets=d.targets||{};
+  const rows=getActiveTasks().map(t=>({t,h:Number(targets[t.id])})).filter(x=>Number.isFinite(x.h));
+  if(!rows.length){el.innerHTML='<span style="color:var(--muted)">No daily targets set yet. Use Edit Targets or let the API populate them.</span>';}
+  else{
+    const total=rows.reduce((a,x)=>a+x.h,0);
+    el.innerHTML=rows.map(x=>`<span style="display:inline-block;margin:3px 5px 3px 0;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)">${x.t.icon} ${x.t.name}: <b>${fmtHrs(x.h)}</b></span>`).join('')+`<div style="margin-top:6px;color:var(--blue);font-weight:600;">Daily target total: ${fmtHrs(total)}</div>`;
+  }
+  if(status) status.textContent=d.updatedAt ? ('Updated '+new Date(d.updatedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})) : 'Local target plan • API sync optional';
+}
+function openDailyTargetsEditor(){
+  const modal=document.getElementById('daily-targets-modal'); const ed=document.getElementById('daily-targets-editor');
+  if(!modal||!ed)return;
+  const d=loadDailyTargets(); const targets=d.targets||{};
+  ed.value=getActiveTasks().map(t=>`${t.name} = ${targets[t.id]!==undefined?targets[t.id]:''}`).join('\n');
+  modal.style.display='flex';
+}
+function closeDailyTargetsEditor(){const m=document.getElementById('daily-targets-modal');if(m)m.style.display='none';}
+function saveDailyTargetsFromEditor(){
+  const ed=document.getElementById('daily-targets-editor'); if(!ed)return;
+  const targets={};
+  ed.value.split(/\n/).forEach(line=>{
+    const m=line.match(/^(.+?)\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$/); if(!m)return;
+    const name=m[1].trim().toLowerCase(); const hrs=parseFloat(m[2]);
+    const task=TASKS.find(t=>t.name.trim().toLowerCase()===name || t.id.toLowerCase()===name);
+    if(task&&hrs>=0&&hrs<=24)targets[task.id]=hrs;
+  });
+  setDailyTargets(targets,todayKey(),'manual'); closeDailyTargetsEditor();
+  showBkpStatus('🎯 Daily targets saved!','ok');
+}
+function clearDailyTargets(){
+  const all=getAllDailyTargets(); delete all[todayKey()]; saveDailyTargetsMap(all); renderDailyTargets(); closeDailyTargetsEditor();
+}
+function getApiConfig(){try{return JSON.parse(localStorage.getItem(API_CONFIG_KEY)||'{}');}catch(e){return {};}}
+function saveApiConfig(cfg){try{localStorage.setItem(API_CONFIG_KEY,JSON.stringify(cfg));}catch(e){}}
+async function dptApi(path,method='GET',body=null){
+  const cfg=getApiConfig(); if(!cfg.baseUrl) throw new Error('API base URL not configured');
+  const res=await fetch(cfg.baseUrl.replace(/\/$/,'')+path,{method,headers:{'Content-Type':'application/json',...(cfg.token?{'Authorization':'Bearer '+cfg.token}:{})},body:body?JSON.stringify(body):undefined});
+  if(!res.ok)throw new Error('API '+res.status); return res.json();
+}
+async function syncTodayFromApi(){
+  try{
+    const data=await dptApi('/tracker/state?date='+encodeURIComponent(todayKey()));
+    if(data&&data.targets)setDailyTargets(data.targets,todayKey(),'api');
+    return data;
+  }catch(e){console.warn('DPT API sync unavailable:',e.message);return null;}
+}
+async function pushTodayToApi(){
+  try{
+    const history=getStorage()[todayKey()]||null; const targets=loadDailyTargets().targets||{};
+    const waste=parseFloat(document.getElementById('waste-today-input')?.value)||0;
+    return await dptApi('/tracker/result','POST',{date:todayKey(),targets,result:history,waste});
+  }catch(e){console.warn('DPT API push unavailable:',e.message);return null;}
+}
 
 // ══════════════════════════════════════════════════════
 //  TASK MANAGEMENT (localStorage-persisted)
@@ -820,6 +916,7 @@ function renderTaskCards() {
       <div class="task-icon" onclick="toggle('${t.id}')">${t.icon}</div>
       <div class="task-info" onclick="toggle('${t.id}')">
         <div class="task-name">${t.name}</div>
+        <div style="font-size:10px;color:var(--blue);margin:2px 0 5px;">🎯 ${targetLabel(t)}</div>
         <div class="task-hours-row">
           <span class="hours-label">⏱ Actual:</span>
           <input class="hours-input" id="hrs-${t.id}" type="number" min="0" max="24" step="0.25"
@@ -1162,6 +1259,7 @@ function resetToDefaultTasks(){
 function rebuildAfterTaskChange(){
   renderTaskCards();
   renderRatingsScale();
+  renderDailyTargets();
   updateUI();
 }
 
@@ -1191,6 +1289,7 @@ function saveDay(){
   const taskSnapshot=getActiveTasks().map(t=>({id:t.id,icon:t.icon,name:t.name,done:state[t.id]||false}));
   history[key]={
     score, totalHrs, tasks:{...state}, taskHours,
+    dailyTargets:(loadDailyTargets().targets||{}),
     taskSnapshot,
     maxScore: calcMaxScore(),
     extraCount:extraTasks.filter(e=>e.done).length,
@@ -1205,6 +1304,7 @@ function saveDay(){
   btn.textContent='✅ Saved to History!';btn.style.background='linear-gradient(135deg,#3ddc84,#2bc470)';
   setTimeout(()=>{btn.textContent="💾 Save Today's Progress to History";btn.style.background='';},2200);
   updateStreaks();
+  pushTodayToApi();
 }
 
 // ══════════════════════════════════════════════════════
@@ -1586,6 +1686,8 @@ function exportBackup(){
       _meta:{app:'Daily Power Tracker',version:'4.0',exported:new Date().toISOString()},
       [HISTORY_KEY]:getStorage(),
       [TASKS_KEY]:TASKS,
+      [DAILY_TARGETS_KEY]:getAllDailyTargets(),
+      [API_CONFIG_KEY]:getApiConfig(),
       [WASTE_KEY]:WASTE,
       [DRAFT_KEY]:JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')
     };
@@ -1606,6 +1708,8 @@ function importBackup(event){
       if(!confirm('⚠️ This will MERGE the backup into your current data.\nExisting days will be overwritten.\n\nContinue?')){event.target.value='';return;}
       const merged=Object.assign({},getStorage(),payload[HISTORY_KEY]);
       setStorage(merged);
+      if(payload[DAILY_TARGETS_KEY]&&typeof payload[DAILY_TARGETS_KEY]==='object') saveDailyTargetsMap(payload[DAILY_TARGETS_KEY]);
+      if(payload[API_CONFIG_KEY]&&typeof payload[API_CONFIG_KEY]==='object') saveApiConfig(payload[API_CONFIG_KEY]);
       if(payload[TASKS_KEY]&&Array.isArray(payload[TASKS_KEY])){
         TASKS=payload[TASKS_KEY];saveTasks(TASKS);
         state={};TASKS.forEach(t=>state[t.id]=false);
@@ -1616,6 +1720,7 @@ function importBackup(event){
       }
       if(payload[DRAFT_KEY])localStorage.setItem(DRAFT_KEY,JSON.stringify(payload[DRAFT_KEY]));
       const count=Object.keys(payload[HISTORY_KEY]).length;
+      renderDailyTargets();
       showBkpStatus('✅ Restored '+count+' days of history!','ok');
       updateStreaks();
     }catch(err){showBkpStatus('❌ Could not read file.','err');}
@@ -1645,6 +1750,8 @@ document.getElementById('energy-select').addEventListener('change',()=>{updateEn
 // Render dynamic tasks
 renderTaskCards();
 renderRatingsScale();
+renderDailyTargets();
+syncTodayFromApi();
 
 restoreDraft();
 restoreWasteToday();
@@ -1657,5 +1764,17 @@ updateStreaks();
   if(el)el.addEventListener('input',triggerAutosave);
 });
 </script>
+
+<div id="daily-targets-modal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-head"><div class="modal-title">🎯 Set Today's Targets</div><button class="modal-close" onclick="closeDailyTargetsEditor()">✕</button></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Enter one line per task: <b>Task Name = hours</b>. Example: <b>Quran Hifz Revision = 0.5</b></div>
+    <textarea id="daily-targets-editor" style="width:100%;min-height:220px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font:12px Outfit,sans-serif;resize:vertical;"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+      <button class="manage-tasks-btn" onclick="clearDailyTargets()">Clear</button>
+      <button class="manage-tasks-btn" onclick="saveDailyTargetsFromEditor()" style="border-color:rgba(61,220,132,.4);">💾 Save Targets</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
